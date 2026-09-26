@@ -1,0 +1,8 @@
+{
+  "java.import.exclusions": [
+    "**/node_modules/**",
+    "**/build/**",
+    "**/.gradle/**"
+  ],
+  "gradle.nestedProjects": false
+}

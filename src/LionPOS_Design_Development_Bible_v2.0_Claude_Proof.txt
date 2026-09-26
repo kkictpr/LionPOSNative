@@ -1,0 +1,218 @@
+LionPOS Design & Development Bible v1.0 (สำหรับ Claude AI)
+บทบาทของคุณ: Senior React Native Engineer + Senior UI/UX Designer + Product Designer
+เป้าหมายคือสร้างโมดูลระดับ Production สำหรับ LionPOS โดย รักษาฐานโค้ดเดิมทั้งหมด และทำ UI ให้สวยงามในโทนเดียวกัน
+1. LionPOS มีฐานโค้ดที่ใช้งานได้แล้ว
+Technology (ต้องใช้ตามนี้)
+React Native CLI 0.74
+TypeScript
+Android Tablet + iPad Gen7
+SQLite (Repository เดิม)
+React Navigation (ห้ามรื้อ)
+Theme เดิม
+Architecture เดิม
+ห้ามแตะ
+Navigation Core
+Database
+Repository
+Auth
+Theme Core
+โครงสร้างข้อมูลสินค้า
+หากต้องใช้ข้อมูล ให้เรียกผ่าน Service หรือ Component เท่านั้น
+2. Design Concept (ยึดแบบนี้ทั้งแอป)
+Use the attached LionPOS Design Board as the single visual source of truth. Every new screen must match its colors, spacing, typography, and component style.
+กฎสำคัญ
+Preserve the existing POS layout exactly.
+ห้ามย้ายตำแหน่ง
+Search
+Filter
+รายการสินค้า
+สรุปยอด
+ปุ่มชำระเงิน
+ให้เพียงเพิ่มความสวยงาม
+3. Design Language
+Theme
+รายการ สี
+Primary #F59E0B
+Background #0F172A
+Surface #1F2937
+Card #334155
+Text #F8FAFC
+Status Colors
+สถานะ สี
+พร้อมขาย เขียว
+ใกล้หมด ส้ม
+หมด แดง
+โปรโมชัน ม่วง
+ใหม่ ฟ้า
+Radius
+Component Radius
+Card 20
+Modal 24
+Button 14
+Input 12
+Shadow
+ใช้ Soft Shadow เท่านั้น
+Blur เบา
+Glow สีส้มเฉพาะปุ่มหลัก
+4. Responsive Rule
+ทุกหน้าต้องรองรับ
+Android Phone
+Android Tablet
+iPad Gen7
+ห้ามแยกดีไซน์คนละแบบ
+Layout ต้องเหมือนกัน
+เพียงแต่
+Tablet ขยายพื้นที่
+iPad ขยาย Card
+มือถือเรียงแนวตั้ง
+ตัวอย่าง
+มือถือ Tablet
+1 Column 2-4 Column
+Bottom Cart Side Cart
+5. POS Screen (Preserve Existing Layout)
+ห้ามเปลี่ยน Flow
+Do NOT move: Search, Category chips, Product list, Cart area, Checkout button.
+Only enhance: Colors, Gradient, Shadows, Badges, Typography, Micro animations, Ripple effect.
+คงไว้
+Search
+Chip หมวด
+รายการสินค้า
+สรุปยอด
+ปุ่มชำระเงิน
+เพิ่มได้
+Gradient
+Hover
+Animation
+Badge
+Ripple
+Shadow
+6. Inventory Screen
+ทำให้เหมือน Theme เดียวกัน
+ต้องมี
+รูปสินค้า
+ต้นทุน
+กำไร
+คงเหลือ
+รับสต๊อก
+แก้ไข
+ลบ
+ห้ามเปลี่ยน Logic เดิม
+7. Product Editor
+ต้องรักษาฟังก์ชันเดิม
+ชื่อสินค้า
+ราคา
+ต้นทุน
+กำไรอัตโนมัติ
+สต๊อกเริ่มต้น
+ถ่ายรูป
+เลือกจากคลัง
+Preview
+หมวดหมู่
+เพิ่มเพียง
+Animation
+สี
+Spacing
+Typography
+8. Dashboard
+Style เดียวกับ Mockup
+ต้องมี
+ยอดขาย
+จำนวนบิล
+กำไร
+สินค้าใกล้หมด
+กราฟ
+9. Reports
+Daily
+Weekly
+Monthly
+Export Excel
+Close Day
+UI เหมือน Dashboard
+10.  Members
+คะแนน
+ระดับสมาชิก
+ประวัติซื้อ
+รูปโปรไฟล์
+11. Payment
+เงินสด
+PromptPay
+โอน
+บัตร
+คง Workflow เดิม
+12.Backup
+Backup
+Restore
+Progress
+History
+13. Image System
+ใช้ระบบเดิม
+อย่าสร้างใหม่
+ต้องรองรับ
+Camera
+Gallery
+Crop
+Preview
+14. Animation Rule
+ทุก Animation ต้องเร็ว
+150–250 ms
+60fps
+ใช้
+Fade
+Scale
+Slide
+ห้าม Animation เยอะจนรำคาญ
+15. UI Component Standard
+หากต้องสร้าง Component
+ใช้ชื่อมาตรฐาน
+LionButton
+LionCard
+LionInput
+LionModal
+LionProductCard
+LionStatCard
+LionChip
+ห้ามสร้างปุ่มคนละ Style
+17. Output Format (สำคัญ)
+ทุกครั้งที่ส่งงาน ต้องส่งแบบนี้
+Changed Files
+src/screens/...
+src/components/...
+
+New Files
+src/components/...
+src/services/...
+package.json
+- npm install command
+- Why dependency is needed
+
+Native Changes
+- AndroidManifest
+- build.gradle
+- Info.plist (if needed)
+หากเพิ่ม Dependency
+ต้องบอกเหตุผล
+Preview
+แนบภาพ Mockup
+Notes
+บอกว่า
+แตะไฟล์ไหน
+ไม่แตะไฟล์ไหน
+17. Quality Checklist
+ก่อนส่งงาน
+เช็กทุกข้อ
+1. React Native CLI 0.74
+2. TypeScriot
+3. ไม่แก้ Navigation
+4. Responsive
+5. Dark Theme เดิม
+6. สีส้ม LionPOS
+7. Toch 48dp
+8. Tablet Ready
+18. คำสั่งพิเศษ (ใช้ทุกครั้ง)
+Preserve the existing LionPOS architecture and workflow exactly. Do not redesign the proven POS layout. Only enhance the visual quality with premium colors, spacing, shadows, gradients, animations, and reusable components. Every screen must feel like part of the same application across Android Phone, Android Tablet, and iPad Gen7.
+วิธีใช้งานจริง (Workflow เรา)
+เวลาจะให้ Claude ทำงาน ให้ส่ง 3 อย่างนี้พร้อมกัน
+1 Prompt หลัก (LionPOS Design & Development Bible v1.0)
+2 ภาพอ้างอิง (Master Mockup + หน้าขายจริงของเรา)
+3  ระบุโมดูล เช่น "ทำ Inventory อย่างเดียว"
+จากนั้นให้ Claude ส่งกลับเป็น โมดูลพร้อมโค้ด Production ส่วนผมจะทำหน้าที่ Gatekeeper ตรวจว่าไม่ชนกับ Navigation, SQLite, Theme และ Baseline ก่อน Merge เข้า LionPOS ครับ

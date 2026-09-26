@@ -3,6 +3,20 @@ import { getDB } from './database';
 
 const newId = () => uuid.v4() as string;
 
+async function enqueueSync(
+  db: any,
+  tableName: string,
+  recordId: string,
+  action: 'upsert' | 'delete',
+  payload: any,
+) {
+  await db.executeSql(
+    `INSERT INTO sync_queue (id, table_name, record_id, action, payload)
+     VALUES (?,?,?,?,?);`,
+    [newId(), tableName, recordId, action, JSON.stringify(payload)],
+  );
+}
+
 // ---------------- Categories ----------------
 export async function listCategories() {
   const db = await getDB();
@@ -38,19 +52,19 @@ export async function listProducts(storeId: string) {
 
 export async function upsertProduct(p: {
   id?: string; name: string; sku?: string; barcode?: string;
-  category_id?: string; price: number; cost?: number; track_stock?: boolean;
+  category_id?: string; price: number; cost?: number; track_stock?: boolean; image_uri?: string;
 }) {
   const db = await getDB();
   const id = p.id ?? newId();
   await db.executeSql(
-    `INSERT INTO products (id, name, sku, barcode, category_id, price, cost, track_stock)
-     VALUES (?,?,?,?,?,?,?,?)
+    `INSERT INTO products (id, name, sku, barcode, category_id, price, cost, track_stock, image_uri)
+     VALUES (?,?,?,?,?,?,?,?,?)
      ON CONFLICT(id) DO UPDATE SET
        name=excluded.name, sku=excluded.sku, barcode=excluded.barcode,
        category_id=excluded.category_id, price=excluded.price, cost=excluded.cost,
-       track_stock=excluded.track_stock;`,
+       track_stock=excluded.track_stock, image_uri=excluded.image_uri;`,
     [id, p.name, p.sku ?? null, p.barcode ?? null, p.category_id ?? null,
-     p.price, p.cost ?? 0, p.track_stock === false ? 0 : 1],
+     p.price, p.cost ?? 0, p.track_stock === false ? 0 : 1, p.image_uri ?? null],
   );
   return id;
 }
@@ -58,6 +72,10 @@ export async function upsertProduct(p: {
 export async function deactivateProduct(id: string) {
   const db = await getDB();
   await db.executeSql(`UPDATE products SET active = 0 WHERE id = ?;`, [id]);
+}
+
+export async function deleteProduct(id: string) {
+  return deactivateProduct(id);
 }
 
 // ---------------- Variants ----------------
@@ -173,7 +191,7 @@ export type CartLine = {
 };
 
 export async function createSale(params: {
-  storeId: string; employeeId: string; customerId?: string; shiftId?: string;
+  storeId: string; employeeId?: string; customerId?: string;
   items: CartLine[]; discount?: number; taxRate?: number; paymentMethod: string;
 }) {
   const db = await getDB();
@@ -209,6 +227,20 @@ export async function createSale(params: {
   if (params.customerId) {
     await addLoyaltyPoints(params.customerId, Math.floor(total / 100));
   }
+
+  await enqueueSync(db, 'sales', id, 'upsert', {
+    id,
+    receipt_no: receiptNo,
+    store_id: params.storeId,
+    employee_id: params.employeeId ?? null,
+    customer_id: params.customerId ?? null,
+    subtotal,
+    discount,
+    tax,
+    total,
+    payment_method: params.paymentMethod,
+        status: 'completed',
+  });
 
   return { id, receiptNo, total };
 }
@@ -498,44 +530,6 @@ export async function listPurchaseOrders(storeId: string) {
     [storeId],
   );
   return rows(res);
-}
-
-// ---------------- Shifts (cash drawer) ----------------
-export async function currentShift(storeId: string, employeeId: string) {
-  const db = await getDB();
-  const [res] = await db.executeSql(
-    `SELECT * FROM shifts WHERE store_id = ? AND employee_id = ? AND closed_at IS NULL
-     ORDER BY opened_at DESC LIMIT 1;`,
-    [storeId, employeeId],
-  );
-  return res.rows.length ? res.rows.item(0) : null;
-}
-
-export async function openShift(storeId: string, employeeId: string, openingCash: number) {
-  const db = await getDB();
-  const id = newId();
-  await db.executeSql(
-    `INSERT INTO shifts (id, store_id, employee_id, opening_cash) VALUES (?,?,?,?);`,
-    [id, storeId, employeeId, openingCash],
-  );
-  return id;
-}
-
-export async function closeShift(shiftId: string, closingCash: number) {
-  const db = await getDB();
-  const [shiftRes] = await db.executeSql(`SELECT * FROM shifts WHERE id = ?;`, [shiftId]);
-  const shift = shiftRes.rows.item(0);
-  const [salesRes] = await db.executeSql(
-    `SELECT IFNULL(SUM(total),0) as cash_sales FROM sales
-     WHERE shift_id = ? AND payment_method = 'cash' AND status = 'completed';`,
-    [shiftId],
-  );
-  const expected = shift.opening_cash + salesRes.rows.item(0).cash_sales;
-  await db.executeSql(
-    `UPDATE shifts SET closing_cash = ?, expected_cash = ?, closed_at = datetime('now') WHERE id = ?;`,
-    [closingCash, expected, shiftId],
-  );
-  return { expected, difference: closingCash - expected };
 }
 
 // ---------------- helper ----------------

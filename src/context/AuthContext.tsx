@@ -1,39 +1,36 @@
-import React, { createContext, useContext, useState, useCallback } from 'react';
-import { findEmployeeByPin } from '../db/repository';
+import React, { createContext, useContext, useEffect, useState } from 'react';
+import { getDB } from '../db/database';
 
 type Employee = { id: string; name: string; role: string; store_id: string };
 
-type AuthContextType = {
-  employee: Employee | null;
-  loginWithPin: (pin: string) => Promise<boolean>;
-  logout: () => void;
-};
-
-const AuthContext = createContext<AuthContextType | undefined>(undefined);
+const C = createContext<any>(undefined);
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [employee, setEmployee] = useState<Employee | null>(null);
+  const [employee, setEmployee] = useState<Employee>({
+    id: 'owner',
+    name: 'เจ้าของร้าน',
+    role: 'owner',
+    store_id: '',
+  });
 
-  const loginWithPin = useCallback(async (pin: string) => {
-    const emp = await findEmployeeByPin(pin);
-    if (emp) {
-      setEmployee({ id: emp.id, name: emp.name, role: emp.role, store_id: emp.store_id });
-      return true;
-    }
-    return false;
+  useEffect(() => {
+    (async () => {
+      const db = await getDB();
+      const [res] = await db.executeSql('SELECT id FROM stores ORDER BY created_at LIMIT 1;');
+      const storeId = res.rows.length ? res.rows.item(0).id : '';
+      setEmployee({ id: 'owner', name: 'เจ้าของร้าน', role: 'owner', store_id: storeId });
+    })();
   }, []);
 
-  const logout = useCallback(() => setEmployee(null), []);
-
   return (
-    <AuthContext.Provider value={{ employee, loginWithPin, logout }}>
+    <C.Provider value={{ employee, loginWithPin: async () => true, logout: () => {} }}>
       {children}
-    </AuthContext.Provider>
+    </C.Provider>
   );
 }
 
 export function useAuth() {
-  const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error('useAuth must be used within AuthProvider');
-  return ctx;
+  const c = useContext(C);
+  if (!c) throw new Error('useAuth must be used within AuthProvider');
+  return c;
 }

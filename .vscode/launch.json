@@ -1,0 +1,18 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "💾 Backup",
+      "type": "node",
+      "request": "launch",
+      "runtimeExecutable": "powershell",
+      "args": [
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "D:\\Backup\\SakuDataCenter\\backup.ps1"
+      ],
+      "console": "integratedTerminal"
+    }
+  ]
+}

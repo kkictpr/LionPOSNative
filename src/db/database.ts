@@ -229,10 +229,23 @@ async function migrate(db: DB) {
       FOREIGN KEY (store_id) REFERENCES stores(id)
     );
   `);
+  await db.executeSql(`
+    CREATE TABLE IF NOT EXISTS sync_queue (
+      id TEXT PRIMARY KEY,
+      table_name TEXT NOT NULL,
+      record_id TEXT NOT NULL,
+      action TEXT NOT NULL,
+      payload TEXT NOT NULL,
+      synced INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+`);
 
-  // add discount_percent / tax_rate columns to sales if migrating from an older version
+  // ---- Migration ----
   await addColumnIfMissing(db, 'sales', 'shift_id', 'TEXT');
   await addColumnIfMissing(db, 'sales', 'table_id', 'TEXT');
+  await addColumnIfMissing(db, 'sales', 'sync_status', "TEXT DEFAULT 'pending'");
+  await addColumnIfMissing(db, 'sales', 'synced_at', 'TEXT');
   await addColumnIfMissing(db, 'products', 'category_id', 'TEXT');
 
   // seed a default store + owner PIN if empty
