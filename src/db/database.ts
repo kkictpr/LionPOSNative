@@ -127,7 +127,7 @@ async function migrate(db: DB) {
       id TEXT PRIMARY KEY,
       receipt_no TEXT NOT NULL,
       store_id TEXT NOT NULL,
-      employee_id TEXT NOT NULL,
+      employee_id TEXT, -- nullable: LionPOS ไม่มีระบบพนักงานแล้ว
       customer_id TEXT,
       subtotal REAL NOT NULL,
       discount REAL DEFAULT 0,
@@ -135,7 +135,8 @@ async function migrate(db: DB) {
       total REAL NOT NULL,
       payment_method TEXT NOT NULL DEFAULT 'cash', -- cash | card | other
       status TEXT NOT NULL DEFAULT 'completed', -- completed | refunded | void
-      created_at TEXT DEFAULT (datetime('now'))
+      created_at TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE SET NULL
     );
   `);
 

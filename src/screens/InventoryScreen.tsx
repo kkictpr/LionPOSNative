@@ -342,22 +342,15 @@ export default function InventoryScreen() {
     if (!hasPermission) return;
 
     try {
-      const picked = await ImageCropPicker.openPicker({
+      const cropped = await ImageCropPicker.openPicker({
         mediaType: 'photo',
-        cropping: false,
-        forceJpg: true,
-        writeTempFile: true,
-      });
-
-      const cropped = await ImageCropPicker.openCropper({
-        path: picked.path,
+        cropping: true,
         width: 800,
         height: 800,
         compressImageQuality: 0.9,
-        freeStyleCropEnabled: false, // locks the crop box to the fixed 1:1 ratio (width/height) below
-        showCropFrame: true,
-        showCropGrid: true,
-        enableRotationGesture: false,
+        forceJpg: true,
+        writeTempFile: true,
+        freeStyleCropEnabled: true,
         cropperCircleOverlay: false,
         cropperToolbarTitle: 'ครอบตัดรูปภาพ (1:1)',
         cropperChooseText: 'เสร็จสิ้น',
@@ -368,8 +361,7 @@ export default function InventoryScreen() {
         cropperActiveWidgetColor: '#F59E0B',
       });
 
-      console.log('Cropped image:', cropped.path, cropped.width, cropped.height);
-      setImageUri(cropped.path);
+      if (cropped?.path) setImageUri(cropped.path);
     } catch (e:any) {
       if (e?.code === 'E_PICKER_CANCELLED') return;
       Alert.alert('เลือกรูปไม่สำเร็จ', e?.message ?? 'เกิดข้อผิดพลาด');
@@ -380,7 +372,7 @@ export default function InventoryScreen() {
     const hasPermission = await requestCameraPermission();
     if (!hasPermission) return;
     try {
-      const image = await ImageCropPicker.openCamera({mediaType:'photo',cropping:true,width:800,height:800,compressImageQuality:0.9,forceJpg:true,freeStyleCropEnabled:false,cropperCircleOverlay:false,cropperToolbarColor:COLORS.surface,cropperStatusBarColor:COLORS.background,cropperToolbarWidgetColor:COLORS.primary,cropperActiveWidgetColor:COLORS.primary,cropperToolbarTitle:'ครอบตัดรูปภาพ (1:1)',cropperChooseText:'เสร็จสิ้น',cropperCancelText:'ยกเลิก'});
+      const image = await ImageCropPicker.openCamera({mediaType:'photo',cropping:true,width:800,height:800,compressImageQuality:0.9,forceJpg:true,freeStyleCropEnabled:true,cropperCircleOverlay:false,cropperToolbarColor:COLORS.surface,cropperStatusBarColor:COLORS.background,cropperToolbarWidgetColor:COLORS.primary,cropperActiveWidgetColor:COLORS.primary,cropperToolbarTitle:'ครอบตัดรูปภาพ (1:1)',cropperChooseText:'เสร็จสิ้น',cropperCancelText:'ยกเลิก'});
       if(image?.path){console.log('Cropped image:',image.width,image.height);setImageUri(image.path);}
     } catch(e:any){if(e?.code==='E_PICKER_CANCELLED') return; Alert.alert('ถ่ายรูปไม่สำเร็จ',e?.message??'เกิดข้อผิดพลาด');}
   };

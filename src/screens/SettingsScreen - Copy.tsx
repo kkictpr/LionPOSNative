@@ -351,6 +351,36 @@ export default function SettingsScreen() {
           </View>
 
           <View style={isTablet ? styles.col : undefined}>
+            {/* ── พนักงาน ──────────────────────────────────────────── */}
+            <SectionCard icon="👤" title="พนักงาน" subtitle="บัญชีที่ใช้งานอยู่" delay={200}>
+              <View style={styles.employeeRow}>
+                <View style={styles.avatar}>
+                  <Text style={styles.avatarText}>{String(employee?.name ?? '?').trim().charAt(0).toUpperCase()}</Text>
+                </View>
+                <View style={styles.employeeMain}>
+                  <Text style={styles.employeeName} numberOfLines={1}>{employee?.name}</Text>
+                  <Text style={styles.employeeRole} numberOfLines={1}>{employee?.role}</Text>
+                </View>
+              </View>
+              {shift ? (
+                <Pressy onPress={() => setCloseModalOpen(true)} style={styles.dangerBtn} rippleColor="rgba(239,68,68,0.2)">
+                  <Text style={styles.dangerText}>
+                    ปิดกะ (เปิดอยู่ตั้งแต่ {new Date(shift.opened_at).toLocaleTimeString('th-TH')})
+                  </Text>
+                </Pressy>
+              ) : (
+                <Text style={styles.hint}>ยังไม่ได้เปิดกะ — เปิดได้จากหน้าขาย</Text>
+              )}
+              <Pressy onPress={logout} rippleColor="rgba(255,255,255,0.2)" style={{ marginTop: 10 }}>
+                <LinearGradient
+                  colors={['#FFB84D', COLORS.primary, COLORS.primaryDark]}
+                  start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+                  style={styles.saveBtnBlock}>
+                  <Text style={styles.saveText}>ออกจากระบบ</Text>
+                </LinearGradient>
+              </Pressy>
+            </SectionCard>
+
             {/* ── สำรองข้อมูล ──────────────────────────────────────── */}
             <SectionCard icon="☁️" title="สำรองข้อมูล" subtitle="ซิงก์ขึ้น Cloud" delay={240}>
               <Text style={styles.hint}>ส่งข้อมูลที่ค้างใน sync_queue ขึ้น Supabase</Text>

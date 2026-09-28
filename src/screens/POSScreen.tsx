@@ -4,11 +4,10 @@ import {
   Animated, Pressable,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
-import { useFocusEffect } from '@react-navigation/native';
-import { useAuth } from '../context/AuthContext';
+import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import {
   listProducts, listCategories, createSale, CartLine ,
-  getSetting, getStore, listVariants,
+  getSetting, getStore, listVariants, listStores,
 } from '../db/repository';
 import { printReceipt, reconnectSavedPrinter, getSavedPrinterMac } from '../utils/printer';
 
@@ -17,6 +16,17 @@ type ProductCardProps = {
   badge: { label: string; bg: string; color: string };
   onPress: () => void;
   onAdd: () => void;
+};
+
+// ผลลัพธ์ที่ PaymentScreen ส่งกลับมาทาง route.params.paymentResult
+type PaymentResult = {
+  billNo?: string;
+  method?: string;        // 'cash' | 'promptpay'
+  total?: number;
+  received?: number;
+  change?: number;
+  reference?: string;
+  paidAt?: string;
 };
 
 function ProductCard({ item, badge, onPress, onAdd }: ProductCardProps) {
@@ -75,7 +85,8 @@ function ProductCard({ item, badge, onPress, onAdd }: ProductCardProps) {
 }
 
 export default function POSScreen() {
-  const { employee } = useAuth();
+  const navigation = useNavigation<any>();
+  const route = useRoute<any>();
   const [products, setProducts] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
@@ -87,13 +98,34 @@ export default function POSScreen() {
   const [selectedProduct, setSelectedProduct] = useState<any | null>(null);
   const [search, setSearch] = useState('');
   const [confirmCheckout, setConfirmCheckout] = useState(false);
+  // กันบันทึกซ้ำ: กำลังบันทึกอยู่ / บิลนี้ (billNo จาก PaymentScreen) บันทึกไปแล้ว
+  const checkoutBusy = useRef(false);
+  const completedBills = useRef<Set<string>>(new Set());
+  // ผลชำระเงินที่ PaymentScreen ส่งกลับมาทาง route.params.paymentResult (serializable)
+  const incomingPayment: PaymentResult | undefined = route.params?.paymentResult;
+  const handledPayments = useRef<Set<string>>(new Set());
+
+  // ไม่มีระบบพนักงานแล้ว: ใช้สาขาแรกในตาราง stores (seed = 'store-1') และจำค่าไว้
+  const storeIdRef = useRef<string | null>(null);
+  const getStoreId = useCallback(async (): Promise<string> => {
+    if (storeIdRef.current) return storeIdRef.current;
+    const stores = await listStores();
+    const id = stores?.[0]?.id;
+    if (!id) throw new Error('ไม่พบข้อมูลสาขา (stores)');
+    storeIdRef.current = id;
+    return id;
+  }, []);
 
   const load = useCallback(async () => {
-    if (!employee) return;
-    setProducts(await listProducts(employee.store_id));
-    setCategories(await listCategories());
-    setTaxRate(parseFloat((await getSetting('tax_rate')) ?? '0'));
-  }, [employee]);
+    try {
+      const storeId = await getStoreId();
+      setProducts(await listProducts(storeId));
+      setCategories(await listCategories());
+      setTaxRate(parseFloat((await getSetting('tax_rate')) ?? '0'));
+    } catch (e) {
+      console.error('[POS_LOAD_ERROR]', e);
+    }
+  }, [getStoreId]);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
@@ -152,52 +184,139 @@ export default function POSScreen() {
   const total = subtotal - discountAmt + taxAmt;
   const cartItemCount = cart.reduce((sum, item) => sum + item.quantity, 0);
 
-  const doCheckout = async () => {
-    if (!employee || cart.length === 0) return;
-    try {
-      const result = await createSale({
-        storeId: employee.store_id,
-        employeeId: employee.id,
-        items: cart,
-        discount: discountAmt,
-        taxRate,
-        paymentMethod: 'cash',
-      });
+  // paymentResult: มาจาก PaymentScreen (route.params.paymentResult) — ถ้าไม่มี = Flow เดิม (จ่ายเงินสด)
+  // จากทาง PaymentScreen: ถ้าบันทึกขายไม่สำเร็จจะ throw (ไม่ล้างตะกร้า) ให้ตัวเรียก (useFocusEffect ด้านล่าง)
+  // แจ้ง error ส่วนขั้นตอนหลัง createSale สำเร็จจะไม่ throw เด็ดขาด กันบิลซ้ำจากการกดลองใหม่
+  const doCheckout = async (paymentResult?: PaymentResult) => {
+    const fromPayment = !!paymentResult;
 
-      const printerMac = await getSavedPrinterMac();
+    if (cart.length === 0) {
+      console.log('[CHECKOUT_SKIP] cart', cart.length); // DEBUG
+      if (fromPayment) throw new Error('ตะกร้าว่าง');
+      return;
+    }
+
+    const billKey = paymentResult?.billNo;
+    if (billKey && completedBills.current.has(billKey)) return; // บิลนี้บันทึกแล้ว ไม่สร้างซ้ำ
+
+    if (checkoutBusy.current) {
+      if (fromPayment) throw new Error('กำลังบันทึกการขาย กรุณารอสักครู่');
+      return;
+    }
+    checkoutBusy.current = true;
+
+    try {
+      const paymentMethod = paymentResult?.method ?? 'cash';
+
+      let result: any;
+      try {
+        result = await createSale({
+          storeId: await getStoreId(),
+          items: cart,
+          discount: discountAmt,
+          taxRate,
+          paymentMethod,
+        });
+      } catch (e: any) {
+        console.error('[CHECKOUT_ERROR:createSale]', e); // DEBUG 4 (จุดที่ createSale throw)
+        if (fromPayment) throw e; // ตัวเรียกจัดการ error — ตะกร้ายังอยู่
+        Alert.alert('เกิดข้อผิดพลาด', String(e?.message ?? e));
+        return;
+      }
+
+      const saleId = result?.saleId ?? result?.id ?? result?.receiptNo; // DEBUG: ใช้ log เท่านั้น
+      console.log(
+        '[CHECKOUT_SUCCESS]',
+        saleId
+      ); // DEBUG 3
+      // ── ขายสำเร็จแล้ว: จากนี้ห้าม throw ──
+      if (billKey) completedBills.current.add(billKey);
+      setCart([]);
+      setDiscountPct('0');
+      setConfirmCheckout(false);
+
+      let printerMac: any = null;
+      try { printerMac = await getSavedPrinterMac(); } catch { /* ข้ามการพิมพ์ */ }
+
       if (printerMac) {
         try {
           await reconnectSavedPrinter();
-          const store = await getStore(employee.store_id);
+          const store = await getStore(await getStoreId());
           const footer = (await getSetting('receipt_footer')) ?? '';
           await printReceipt({
             storeName: store?.name ?? 'ร้านค้า',
             storeAddress: store?.address,
             storePhone: store?.phone,
             receiptNo: result.receiptNo,
-            employeeName: employee.name,
+            employeeName: '',
             createdAt: new Date().toISOString(),
             items: cart.map(i => ({
               name: i.name, quantity: i.quantity, unit_price: i.unit_price,
               line_total: i.quantity * i.unit_price - (i.line_discount ?? 0),
             })),
             subtotal, discount: discountAmt, tax: taxAmt, total: result.total,
-            paymentMethod: 'cash', footer,
+            paymentMethod, footer,
           });
-          Alert.alert('ขายสำเร็จ', `เลขที่ใบเสร็จ ${result.receiptNo}\nพิมพ์ใบเสร็จแล้ว`);
+          // จาก PaymentScreen: PaymentScreen แสดง Alert สำเร็จไปแล้ว (กัน Alert ซ้อน)
+          if (!fromPayment) {
+            Alert.alert('ขายสำเร็จ', `เลขที่ใบเสร็จ ${result.receiptNo}\nพิมพ์ใบเสร็จแล้ว`);
+          }
         } catch (printErr) {
           Alert.alert('พิมพ์ใบเสร็จไม่สำเร็จ', 'ขายสำเร็จแล้ว แต่พิมพ์ใบเสร็จไม่ได้ — ตรวจสอบเครื่องพิมพ์ในหน้าตั้งค่า');
         }
-      } else {
+      } else if (!fromPayment) {
         Alert.alert('ขายสำเร็จ', `เลขที่ใบเสร็จ ${result.receiptNo}\nยอดรวม ฿${result.total.toFixed(2)}`);
       }
-      setCart([]);
-      setDiscountPct('0');
-      load();
-    } catch (e: any) {
-      Alert.alert('เกิดข้อผิดพลาด', String(e?.message ?? e));
+
+      load().catch(() => {}); // Refresh หน้า POS (สต็อก/สินค้า)
+    } finally {
+      checkoutBusy.current = false;
     }
   };
+
+  // ใช้ doCheckout ตัวล่าสุดเสมอ โดยไม่ให้ effect ด้านล่างรันซ้ำทุก render
+  const doCheckoutRef = useRef(doCheckout);
+  doCheckoutRef.current = doCheckout;
+
+  // กลับมาหน้า POS จาก PaymentScreen → ถ้ามี paymentResult ให้ปิดการขาย แล้วเคลียร์ params
+  useFocusEffect(useCallback(() => {
+    console.log('[POS_ROUTE]', route.name, route.key); // DEBUG (เพิ่มเติม): ชื่อ route จริงของหน้า POS
+    console.log(
+      '[PAYMENT_RESULT]',
+      route.params?.paymentResult
+    ); // DEBUG 1
+    if (!incomingPayment) return;
+    const key = incomingPayment.billNo ?? incomingPayment.paidAt ?? 'payment';
+    if (handledPayments.current.has(key)) {
+      navigation.setParams({ paymentResult: undefined });
+      console.log('[PAYMENT_RESULT_CLEARED]', '(duplicate)'); // DEBUG 5
+      return;
+    }
+    handledPayments.current.add(key); // บิลเดียวประมวลผลได้ครั้งเดียว
+    (async () => {
+      try {
+        console.log(
+          '[CHECKOUT_START]',
+          incomingPayment
+        ); // DEBUG 2
+        await doCheckoutRef.current(incomingPayment);
+      } catch (e: any) {
+        console.error(
+          '[CHECKOUT_ERROR]',
+          e
+        ); // DEBUG 4
+        Alert.alert(
+          'บันทึกการขายไม่สำเร็จ',
+          `ตะกร้ายังอยู่ กรุณากดชำระเงินใหม่\n${String(e?.message ?? e)}`,
+        );
+      } finally {
+        navigation.setParams({ paymentResult: undefined });
+        console.log(
+          '[PAYMENT_RESULT_CLEARED]'
+        ); // DEBUG 5
+      }
+    })();
+  }, [incomingPayment, navigation]));
 
   return (
     <View style={styles.wrap}>
@@ -268,7 +387,15 @@ export default function POSScreen() {
             <Text style={styles.totalValue}>฿{total.toFixed(2)}</Text>
           </View>
           <TouchableOpacity
-            onPress={() => setConfirmCheckout(true)}
+            onPress={() => navigation.navigate('Payment', {
+              // เพิ่ม id/price ให้ PaymentScreen แสดงรายการได้ถูกต้อง (ของเดิมยังอยู่ครบ)
+              cart: cart.map(i => ({
+                ...i,
+                id: i.variant_id ? `${i.product_id}:${i.variant_id}` : i.product_id,
+                price: i.unit_price,
+              })),
+              subtotal, discountAmt, taxRate, total,
+            })}
             disabled={cart.length === 0}
             activeOpacity={0.85}
             style={cart.length === 0 && styles.checkoutBtnDisabled}>

@@ -1,0 +1,1 @@
+export function speakPayment(text:string){/* hook TTS later */}

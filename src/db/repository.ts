@@ -184,6 +184,36 @@ export async function addLoyaltyPoints(customerId: string, points: number) {
   await db.executeSql(`UPDATE customers SET points = points + ? WHERE id = ?;`, [points, customerId]);
 }
 
+// ---------------- Sale transaction ----------------
+// ครอบการขายทั้งก้อนด้วย SQLite transaction เดียว (atomic): สำเร็จครบ = COMMIT, ขั้นไหนพลาด = ROLLBACK แล้ว throw ต่อ
+// ทุกฟังก์ชันใช้ connection เดียวกัน (getDB singleton) จึงอยู่ใน transaction นี้อัตโนมัติ
+// คิว (mutex) กัน createSale สองตัวซ้อนกัน เพราะ SQLite เริ่ม BEGIN ซ้อนใน connection เดียวกันไม่ได้
+let saleTxQueue: Promise<unknown> = Promise.resolve();
+
+function withSaleTransaction<T>(db: any, saleId: string, work: () => Promise<T>): Promise<T> {
+  const run = async (): Promise<T> => {
+    console.log('[SALE_TX_BEGIN]', saleId);
+    await db.executeSql(`BEGIN IMMEDIATE;`);
+    try {
+      const result = await work();
+      await db.executeSql(`COMMIT;`);
+      console.log('[SALE_TX_COMMIT]', saleId);
+      return result;
+    } catch (e) {
+      console.log('[SALE_TX_ROLLBACK]', saleId, e);
+      try {
+        await db.executeSql(`ROLLBACK;`);
+      } catch (rollbackErr) {
+        console.error('[SALE_TX_ROLLBACK_ERROR]', saleId, rollbackErr);
+      }
+      throw e;
+    }
+  };
+  const p = saleTxQueue.then(run);
+  saleTxQueue = p.catch(() => undefined); // คิวต้องไม่ค้างเมื่อรอบก่อน fail
+  return p;
+}
+
 // ---------------- Sales ----------------
 export type CartLine = {
   product_id: string; variant_id?: string; name: string;
@@ -191,7 +221,9 @@ export type CartLine = {
 };
 
 export async function createSale(params: {
-  storeId: string; employeeId?: string; customerId?: string;
+  storeId: string;
+  employeeId?: string | null; // deprecated: LionPOS ไม่มีระบบพนักงานแล้ว — ไม่ถูกใช้/ไม่บันทึกลง sales
+  customerId?: string; shiftId?: string;
   items: CartLine[]; discount?: number; taxRate?: number; paymentMethod: string;
 }) {
   const db = await getDB();
@@ -206,40 +238,47 @@ export async function createSale(params: {
   const tax = taxableAmount * (taxRate / 100);
   const total = taxableAmount + tax;
 
-  await db.executeSql(
-    `INSERT INTO sales (id, receipt_no, store_id, employee_id, customer_id, subtotal, discount, tax, total, payment_method, shift_id)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?);`,
-    [id, receiptNo, params.storeId, params.employeeId, params.customerId ?? null,
-     subtotal, discount, tax, total, params.paymentMethod, params.shiftId ?? null],
-  );
-
-  for (const item of params.items) {
-    const lineTotal = item.quantity * item.unit_price - (item.line_discount ?? 0);
+  await withSaleTransaction(db, id, async () => {
+    // 1) INSERT sales
     await db.executeSql(
-      `INSERT INTO sale_items (id, sale_id, product_id, variant_id, name, quantity, unit_price, line_discount, line_total)
-       VALUES (?,?,?,?,?,?,?,?,?);`,
-      [newId(), id, item.product_id, item.variant_id ?? null, item.name,
-       item.quantity, item.unit_price, item.line_discount ?? 0, lineTotal],
+      `INSERT INTO sales (id, receipt_no, store_id, customer_id, subtotal, discount, tax, total, payment_method, shift_id)
+       VALUES (?,?,?,?,?,?,?,?,?,?);`,
+      [id, receiptNo, params.storeId, params.customerId ?? null,
+       subtotal, discount, tax, total, params.paymentMethod, params.shiftId ?? null],
     );
-    await adjustStock(item.product_id, params.storeId, -item.quantity, 'sale');
-  }
 
-  if (params.customerId) {
-    await addLoyaltyPoints(params.customerId, Math.floor(total / 100));
-  }
+    for (const item of params.items) {
+      const lineTotal = item.quantity * item.unit_price - (item.line_discount ?? 0);
+      // 2) INSERT sale_items
+      await db.executeSql(
+        `INSERT INTO sale_items (id, sale_id, product_id, variant_id, name, quantity, unit_price, line_discount, line_total)
+         VALUES (?,?,?,?,?,?,?,?,?);`,
+        [newId(), id, item.product_id, item.variant_id ?? null, item.name,
+         item.quantity, item.unit_price, item.line_discount ?? 0, lineTotal],
+      );
+      // 3) adjustStock
+      await adjustStock(item.product_id, params.storeId, -item.quantity, 'sale');
+    }
 
-  await enqueueSync(db, 'sales', id, 'upsert', {
-    id,
-    receipt_no: receiptNo,
-    store_id: params.storeId,
-    employee_id: params.employeeId ?? null,
-    customer_id: params.customerId ?? null,
-    subtotal,
-    discount,
-    tax,
-    total,
-    payment_method: params.paymentMethod,
-        status: 'completed',
+    // 4) addLoyaltyPoints
+    if (params.customerId) {
+      await addLoyaltyPoints(params.customerId, Math.floor(total / 100));
+    }
+
+    // 5) enqueueSync
+    await enqueueSync(db, 'sales', id, 'upsert', {
+      id,
+      receipt_no: receiptNo,
+      store_id: params.storeId,
+      employee_id: null,
+      customer_id: params.customerId ?? null,
+      subtotal,
+      discount,
+      tax,
+      total,
+      payment_method: params.paymentMethod,
+      status: 'completed',
+    });
   });
 
   return { id, receiptNo, total };
@@ -276,7 +315,7 @@ export async function listSales(storeId: string, limit = 50) {
   const db = await getDB();
   const [res] = await db.executeSql(
     `SELECT s.*, e.name as employee_name FROM sales s
-     JOIN employees e ON e.id = s.employee_id
+     LEFT JOIN employees e ON e.id = s.employee_id
      WHERE s.store_id = ? ORDER BY s.created_at DESC LIMIT ?;`,
     [storeId, limit],
   );
@@ -313,8 +352,8 @@ export async function topProducts(storeId: string, fromISO: string, toISO: strin
 export async function salesByEmployee(storeId: string, fromISO: string, toISO: string) {
   const db = await getDB();
   const [res] = await db.executeSql(
-    `SELECT e.name, COUNT(*) as order_count, SUM(s.total) as revenue
-     FROM sales s JOIN employees e ON e.id = s.employee_id
+    `SELECT COALESCE(e.name, 'ไม่ระบุพนักงาน') as name, COUNT(*) as order_count, SUM(s.total) as revenue
+     FROM sales s LEFT JOIN employees e ON e.id = s.employee_id
      WHERE s.store_id = ? AND s.status = 'completed' AND s.created_at BETWEEN ? AND ?
      GROUP BY s.employee_id
      ORDER BY revenue DESC;`,
@@ -373,14 +412,14 @@ export async function getOpenTicketForTable(tableId: string) {
   return res.rows.length ? res.rows.item(0) : null;
 }
 
-export async function openTicket(params: { storeId: string; employeeId: string; tableId: string }) {
+export async function openTicket(params: { storeId: string; employeeId?: string | null; tableId: string }) {
   const db = await getDB();
   const id = newId();
   const receiptNo = `T${Date.now()}`;
   await db.executeSql(
-    `INSERT INTO sales (id, receipt_no, store_id, employee_id, subtotal, total, payment_method, status, table_id)
-     VALUES (?,?,?,?,0,0,'cash','open',?);`,
-    [id, receiptNo, params.storeId, params.employeeId, params.tableId],
+    `INSERT INTO sales (id, receipt_no, store_id, subtotal, total, payment_method, status, table_id)
+     VALUES (?,?,?,0,0,'cash','open',?);`,
+    [id, receiptNo, params.storeId, params.tableId],
   );
   await db.executeSql(`UPDATE tables SET status = 'occupied' WHERE id = ?;`, [params.tableId]);
   return id;

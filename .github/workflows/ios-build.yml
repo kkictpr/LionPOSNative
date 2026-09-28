@@ -15,7 +15,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
 
       - name: Install Dependencies
@@ -35,3 +35,9 @@ jobs:
             -configuration Release \
             -sdk iphoneos \
             CODE_SIGNING_ALLOWED=NO
+
+      - name: Upload iOS App
+        uses: actions/upload-artifact@v4
+        with:
+           name: LionPOS-iOS-app
+           path: ios/build/Build/Products/Release-iphonesimulator/*.app
