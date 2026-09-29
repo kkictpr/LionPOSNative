@@ -1,4 +1,3 @@
-
 name: LionPOS iOS Build
 
 on:
@@ -15,7 +14,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 20
           cache: npm
 
       - name: Install Dependencies
@@ -28,16 +27,70 @@ jobs:
 
       - name: Build iOS (No Signing)
         run: |
+          set -euo pipefail
           cd ios
-          xcodebuild \
+          xcodebuild build \
             -workspace LionPOSNative.xcworkspace \
             -scheme LionPOSNative \
             -configuration Release \
             -sdk iphoneos \
+            -derivedDataPath "$GITHUB_WORKSPACE/build/DerivedData" \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO
 
-      - name: Upload iOS App
+      - name: Verify .app exists
+        run: |
+          set -euo pipefail
+          PRODUCTS_DIR="$GITHUB_WORKSPACE/build/DerivedData/Build/Products/Release-iphoneos"
+
+          if [ ! -d "$PRODUCTS_DIR" ]; then
+            echo "::error::Build products directory not found: $PRODUCTS_DIR"
+            exit 1
+          fi
+
+          echo "Contents of $PRODUCTS_DIR:"
+          ls -la "$PRODUCTS_DIR"
+
+          APP_COUNT=$(find "$PRODUCTS_DIR" -maxdepth 1 -type d -name "*.app" | wc -l | tr -d ' ')
+          if [ "$APP_COUNT" -ne 1 ]; then
+            echo "::error::Expected exactly 1 .app in $PRODUCTS_DIR but found $APP_COUNT"
+            exit 1
+          fi
+
+          APP_PATH=$(find "$PRODUCTS_DIR" -maxdepth 1 -type d -name "*.app")
+          echo "Found app: $APP_PATH"
+          echo "APP_PATH=$APP_PATH" >> "$GITHUB_ENV"
+
+      - name: Package IPA
+        run: |
+          set -euo pipefail
+          OUT_DIR="$GITHUB_WORKSPACE/build/ipa"
+          rm -rf "$OUT_DIR"
+          mkdir -p "$OUT_DIR/Payload"
+
+          cp -R "$APP_PATH" "$OUT_DIR/Payload/LionPOSNative.app"
+
+          cd "$OUT_DIR"
+          zip -qry LionPOSNative.ipa Payload
+          rm -rf Payload
+
+      - name: Verify .ipa exists
+        run: |
+          set -euo pipefail
+          IPA_PATH="$GITHUB_WORKSPACE/build/ipa/LionPOSNative.ipa"
+
+          if [ ! -f "$IPA_PATH" ]; then
+            echo "::error::IPA not found: $IPA_PATH"
+            exit 1
+          fi
+
+          ls -lh "$IPA_PATH"
+          unzip -l "$IPA_PATH" | head -n 20
+
+      - name: Upload IPA Artifact
         uses: actions/upload-artifact@v4
         with:
-           name: LionPOS-iOS-app
-           path: ios/build/Build/Products/Release-iphonesimulator/*.app
+          name: LionPOSNative-iOS-IPA
+          path: build/ipa/LionPOSNative.ipa
+          if-no-files-found: error
